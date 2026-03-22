@@ -1,0 +1,720 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SurgSim — Hand Tracker</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600&family=IBM+Plex+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --green:  #00ff9d;
+    --cyan:   #00d4ff;
+    --red:    #ff4560;
+    --amber:  #ffa500;
+    --bg:     #07090d;
+    --bg2:    #0d1117;
+    --bg3:    #131920;
+    --border: rgba(0,255,157,0.15);
+    --mono:   'IBM Plex Mono', monospace;
+    --sans:   'IBM Plex Sans', sans-serif;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--green);
+    font-family: var(--mono);
+    height: 100vh;
+    overflow: hidden;
+    display: grid;
+    grid-template-rows: 44px 1fr 40px;
+    grid-template-columns: 260px 1fr 260px;
+    gap: 0;
+  }
+
+  /* SCANLINE OVERLAY */
+  body::after {
+    content: '';
+    position: fixed; inset: 0;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(0,0,0,0.07) 2px,
+      rgba(0,0,0,0.07) 4px
+    );
+    pointer-events: none;
+    z-index: 100;
+  }
+
+  /* TOP BAR */
+  header {
+    grid-column: 1 / -1;
+    grid-row: 1;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 20px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg2);
+  }
+
+  .header-left { display: flex; align-items: center; gap: 12px; }
+  .logo { font-size: 13px; font-weight: 600; letter-spacing: .1em; color: var(--green); }
+  .logo span { color: rgba(0,255,157,0.4); }
+  .divider { width: 1px; height: 16px; background: var(--border); }
+  .subtitle { font-size: 10px; font-weight: 300; color: rgba(0,255,157,0.5); letter-spacing: .12em; }
+
+  .header-right { display: flex; align-items: center; gap: 16px; font-size: 10px; color: rgba(0,255,157,0.5); letter-spacing: .08em; }
+  .status-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); animation: blink 1.4s ease-in-out infinite; }
+  @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.2} }
+
+  /* LEFT PANEL */
+  .panel-left {
+    grid-column: 1;
+    grid-row: 2;
+    border-right: 1px solid var(--border);
+    background: var(--bg2);
+    padding: 20px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    overflow: hidden;
+  }
+
+  /* CENTER (video) */
+  .center {
+    grid-column: 2;
+    grid-row: 2;
+    position: relative;
+    overflow: hidden;
+    background: #000;
+  }
+
+  #webcam {
+    position: absolute;
+    width: 100%; height: 100%;
+    object-fit: cover;
+    transform: scaleX(-1);
+    opacity: 0.85;
+  }
+
+  #overlay {
+    position: absolute;
+    width: 100%; height: 100%;
+    transform: scaleX(-1);
+  }
+
+  .no-camera {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    color: rgba(0,255,157,0.4);
+    font-size: 12px;
+    text-align: center;
+  }
+  .no-camera .big { font-size: 40px; line-height: 1; }
+  .no-camera p { max-width: 240px; line-height: 1.7; }
+
+  /* Gesture overlay badge */
+  #gesture-badge {
+    position: absolute;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 8px 20px;
+    border: 1px solid var(--green);
+    background: rgba(0,255,157,0.08);
+    font-size: 13px;
+    font-weight: 500;
+    letter-spacing: .12em;
+    color: var(--green);
+    text-transform: uppercase;
+    backdrop-filter: blur(4px);
+    opacity: 0;
+    transition: opacity .2s, border-color .2s, color .2s;
+    white-space: nowrap;
+  }
+  #gesture-badge.visible { opacity: 1; }
+  #gesture-badge.pinch    { color: var(--cyan); border-color: var(--cyan); background: rgba(0,212,255,0.08); }
+  #gesture-badge.scissors { color: var(--red);  border-color: var(--red);  background: rgba(255,69,96,0.08); }
+  #gesture-badge.open     { color: var(--amber);border-color: var(--amber);background: rgba(255,165,0,0.08); }
+  #gesture-badge.fist     { color: var(--green);border-color: var(--green);background: rgba(0,255,157,0.08); }
+
+  /* RIGHT PANEL */
+  .panel-right {
+    grid-column: 3;
+    grid-row: 2;
+    border-left: 1px solid var(--border);
+    background: var(--bg2);
+    padding: 20px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    overflow: hidden;
+  }
+
+  /* BOTTOM BAR */
+  footer {
+    grid-column: 1 / -1;
+    grid-row: 3;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 20px;
+    border-top: 1px solid var(--border);
+    background: var(--bg2);
+    font-size: 10px;
+    color: rgba(0,255,157,0.45);
+    letter-spacing: .08em;
+  }
+
+  .footer-center { display: flex; gap: 24px; }
+
+  /* Panel shared styles */
+  .panel-section { display: flex; flex-direction: column; gap: 8px; }
+  .panel-label {
+    font-size: 9px;
+    font-weight: 500;
+    letter-spacing: .14em;
+    color: rgba(0,255,157,0.35);
+    text-transform: uppercase;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 6px;
+  }
+
+  /* Gesture cards */
+  .gesture-card {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--bg3);
+    transition: all .25s;
+    cursor: default;
+  }
+  .gesture-card.active-pinch    { border-color: var(--cyan); background: rgba(0,212,255,0.08); }
+  .gesture-card.active-scissors { border-color: var(--red);  background: rgba(255,69,96,0.08); }
+  .gesture-card.active-open     { border-color: var(--amber);background: rgba(255,165,0,0.08); }
+  .gesture-card.active-fist     { border-color: var(--green);background: rgba(0,255,157,0.08); }
+  .gesture-icon { font-size: 18px; width: 24px; text-align: center; filter: grayscale(1); transition: filter .25s; }
+  .gesture-card.active-pinch    .gesture-icon,
+  .gesture-card.active-scissors .gesture-icon,
+  .gesture-card.active-open     .gesture-icon,
+  .gesture-card.active-fist     .gesture-icon { filter: grayscale(0); }
+  .gesture-info { flex: 1; }
+  .g-name  { font-size: 11px; font-weight: 500; color: rgba(0,255,157,0.7); }
+  .g-action{ font-size: 10px; color: rgba(0,255,157,0.35); margin-top: 2px; }
+  .g-conf  { font-size: 9px; font-family: var(--mono); color: rgba(0,255,157,0.25); margin-top: 4px; transition: color .2s; }
+  .gesture-card.active-pinch    .g-conf { color: var(--cyan); }
+  .gesture-card.active-scissors .g-conf { color: var(--red); }
+  .gesture-card.active-open     .g-conf { color: var(--amber); }
+  .gesture-card.active-fist     .g-conf { color: var(--green); }
+
+  /* Landmark list */
+  .lm-grid { display: grid; grid-template-columns: auto 1fr 1fr 1fr; gap: 2px 8px; font-size: 9px; }
+  .lm-header { color: rgba(0,255,157,0.3); font-size: 9px; font-weight: 500; border-bottom: 1px solid var(--border); padding-bottom: 4px; }
+  .lm-row { color: rgba(0,255,157,0.5); font-variant-numeric: tabular-nums; }
+  .lm-row.highlight { color: var(--cyan); }
+
+  /* Tip indicators */
+  .tip-dots { display: flex; gap: 6px; flex-wrap: wrap; }
+  .tip-dot {
+    display: flex; align-items: center; gap: 4px;
+    font-size: 9px; color: rgba(0,255,157,0.35);
+  }
+  .dot { width: 6px; height: 6px; border-radius: 50%; background: rgba(0,255,157,0.2); transition: background .2s; }
+  .dot.up { background: var(--cyan); }
+
+  /* Confidence bars */
+  .conf-row { display: flex; align-items: center; gap: 8px; }
+  .conf-label { font-size: 9px; color: rgba(0,255,157,0.4); width: 60px; }
+  .conf-bar { flex: 1; height: 4px; background: rgba(0,255,157,0.1); border-radius: 2px; overflow: hidden; }
+  .conf-fill { height: 100%; border-radius: 2px; background: var(--green); transition: width .1s; }
+  .conf-val { font-size: 9px; color: rgba(0,255,157,0.4); width: 28px; text-align: right; }
+
+  /* Hand count */
+  .hand-count-display { text-align: center; }
+  .hand-big { font-size: 32px; font-weight: 600; color: var(--green); line-height: 1; }
+  .hand-sub { font-size: 9px; color: rgba(0,255,157,0.35); margin-top: 4px; letter-spacing: .1em; }
+
+  /* Grid crosshair overlay on video */
+  .center::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(0,255,157,0.04) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0,255,157,0.04) 1px, transparent 1px);
+    background-size: 60px 60px;
+    pointer-events: none;
+    z-index: 1;
+  }
+  .corner { position: absolute; width: 20px; height: 20px; z-index: 2; }
+  .corner.tl { top: 10px; left: 10px; border-top: 1px solid var(--green); border-left: 1px solid var(--green); }
+  .corner.tr { top: 10px; right: 10px; border-top: 1px solid var(--green); border-right: 1px solid var(--green); }
+  .corner.bl { bottom: 10px; left: 10px; border-bottom: 1px solid var(--green); border-left: 1px solid var(--green); }
+  .corner.br { bottom: 10px; right: 10px; border-bottom: 1px solid var(--green); border-right: 1px solid var(--green); }
+
+  .loading-msg {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    text-align: center;
+    z-index: 10;
+    font-size: 11px;
+    color: rgba(0,255,157,0.6);
+    letter-spacing: .1em;
+  }
+  .loading-msg p { margin-top: 8px; animation: blink 1.4s ease-in-out infinite; }
+</style>
+</head>
+<body>
+
+<!-- TOP BAR -->
+<header>
+  <div class="header-left">
+    <span class="logo">SURG<span>SIM</span></span>
+    <div class="divider"></div>
+    <span class="subtitle">HAND TRACKER — PHASE 01 PROTOTYPE</span>
+  </div>
+  <div class="header-right">
+    <span>@mediapipe/hands</span>
+    <div class="divider"></div>
+    <span id="fps-display">FPS: --</span>
+    <div class="status-dot"></div>
+    <span id="status-text">INITIALIZING</span>
+  </div>
+</header>
+
+<!-- LEFT PANEL -->
+<div class="panel-left">
+  <div class="panel-section">
+    <div class="panel-label">Gesture recognition</div>
+    <div class="gesture-card" id="gc-pinch">
+      <div class="gesture-icon">🤌</div>
+      <div class="gesture-info">
+        <div class="g-name">PINCH</div>
+        <div class="g-action">Grasp / hold tissue</div>
+        <div class="g-conf" id="gc-pinch-conf">dist(L4,L8): —</div>
+      </div>
+    </div>
+    <div class="gesture-card" id="gc-scissors">
+      <div class="gesture-icon">✌️</div>
+      <div class="gesture-info">
+        <div class="g-name">SCISSORS</div>
+        <div class="g-action">Incision / cut</div>
+        <div class="g-conf" id="gc-scissors-conf">index↑ middle↑ ring↓ pinky↓</div>
+      </div>
+    </div>
+    <div class="gesture-card" id="gc-open">
+      <div class="gesture-icon">🖐</div>
+      <div class="gesture-info">
+        <div class="g-name">OPEN PALM</div>
+        <div class="g-action">Retract / push aside</div>
+        <div class="g-conf" id="gc-open-conf">all fingers extended</div>
+      </div>
+    </div>
+    <div class="gesture-card" id="gc-fist">
+      <div class="gesture-icon">✊</div>
+      <div class="gesture-info">
+        <div class="g-name">FIST</div>
+        <div class="g-action">Release / confirm</div>
+        <div class="g-conf" id="gc-fist-conf">all fingers folded</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel-section">
+    <div class="panel-label">Finger state</div>
+    <div class="tip-dots" id="tip-dots">
+      <div class="tip-dot"><div class="dot" id="dot-index"></div><span>INDEX</span></div>
+      <div class="tip-dot"><div class="dot" id="dot-middle"></div><span>MIDDLE</span></div>
+      <div class="tip-dot"><div class="dot" id="dot-ring"></div><span>RING</span></div>
+      <div class="tip-dot"><div class="dot" id="dot-pinky"></div><span>PINKY</span></div>
+      <div class="tip-dot"><div class="dot" id="dot-thumb"></div><span>THUMB</span></div>
+    </div>
+  </div>
+
+  <div class="panel-section">
+    <div class="panel-label">Detection confidence</div>
+    <div style="display:flex;flex-direction:column;gap:6px;">
+      <div class="conf-row">
+        <span class="conf-label">DETECTION</span>
+        <div class="conf-bar"><div class="conf-fill" id="conf-det" style="width:0%"></div></div>
+        <span class="conf-val" id="conf-det-val">--</span>
+      </div>
+      <div class="conf-row">
+        <span class="conf-label">TRACKING</span>
+        <div class="conf-bar"><div class="conf-fill" id="conf-trk" style="width:0%"></div>
+        </div>
+        <span class="conf-val" id="conf-trk-val">--</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- CENTER VIDEO -->
+<div class="center">
+  <div class="corner tl"></div>
+  <div class="corner tr"></div>
+  <div class="corner bl"></div>
+  <div class="corner br"></div>
+
+  <div class="loading-msg" id="loading-msg">
+    <div style="font-size:24px">🔬</div>
+    <p>LOADING MEDIAPIPE MODEL...</p>
+  </div>
+
+  <video id="webcam" autoplay muted playsinline></video>
+  <canvas id="overlay"></canvas>
+  <div id="gesture-badge">—</div>
+</div>
+
+<!-- RIGHT PANEL -->
+<div class="panel-right">
+  <div class="panel-section">
+    <div class="panel-label">Hands detected</div>
+    <div class="hand-count-display">
+      <div class="hand-big" id="hand-count">0</div>
+      <div class="hand-sub">ACTIVE HANDS</div>
+    </div>
+  </div>
+
+  <div class="panel-section" style="flex:1;overflow:hidden">
+    <div class="panel-label">Key landmarks — hand 0</div>
+    <div class="lm-grid" id="lm-grid">
+      <span class="lm-header">LM</span>
+      <span class="lm-header">X</span>
+      <span class="lm-header">Y</span>
+      <span class="lm-header">Z</span>
+    </div>
+  </div>
+
+  <div class="panel-section">
+    <div class="panel-label">Surgical step guide</div>
+    <div style="font-size:10px;color:rgba(0,255,157,0.4);line-height:1.8;">
+      <div>01. 🤌 PINCH — hold incision site</div>
+      <div>02. ✌️ SCISSORS — make cut</div>
+      <div>03. 🖐 OPEN — retract tissue</div>
+      <div>04. 🤌 PINCH — grasp instrument</div>
+      <div>05. ✊ FIST — confirm / release</div>
+    </div>
+  </div>
+</div>
+
+<!-- BOTTOM BAR -->
+<footer>
+  <span>SURGSIM v0.1 — PROTOTYPE</span>
+  <div class="footer-center">
+    <span id="model-info">MODEL: mediapipe/hands@0.4</span>
+    <span id="resolution-info">RESOLUTION: --</span>
+    <span id="landmarks-info">LANDMARKS: 21/HAND</span>
+  </div>
+  <span>OPEN IN CHROME/FIREFOX — ALLOW CAMERA ACCESS</span>
+</footer>
+
+<!-- MEDIAPIPE SCRIPTS -->
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
+<script>
+const videoEl = document.getElementById('webcam');
+const canvasEl = document.getElementById('overlay');
+const ctx = canvasEl.getContext('2d');
+
+// Key landmark names for display
+const LM_NAMES = {
+  0:'WRIST', 4:'THUMB TIP', 5:'IDX MCP', 8:'IDX TIP',
+  9:'MID MCP', 12:'MID TIP', 13:'RNG MCP', 16:'RNG TIP',
+  17:'PNK MCP', 20:'PNK TIP'
+};
+const KEY_LMS = [0,4,5,8,9,12,13,16,17,20];
+
+// FPS tracking
+let frameCount = 0, lastTime = performance.now();
+
+// Gesture smoothing
+let gestureBuffer = [], prevGesture = 'NEUTRAL';
+const BUFFER_SIZE = 5;
+
+// ─── GESTURE DETECTION ─────────────────────────────────────────────
+function isFingerUp(lm, tipIdx, pipIdx) {
+  return lm[tipIdx].y < lm[pipIdx].y;
+}
+
+function pinchDist(lm) {
+  return Math.sqrt(
+    Math.pow(lm[4].x - lm[8].x, 2) +
+    Math.pow(lm[4].y - lm[8].y, 2)
+  );
+}
+
+function detectGesture(lm) {
+  const dist = pinchDist(lm);
+  if (dist < 0.08) return 'PINCH';
+
+  const indexUp  = isFingerUp(lm, 8,  6);
+  const middleUp = isFingerUp(lm, 12, 10);
+  const ringUp   = isFingerUp(lm, 16, 14);
+  const pinkyUp  = isFingerUp(lm, 20, 18);
+
+  if  (indexUp && middleUp && !ringUp && !pinkyUp) return 'SCISSORS';
+  if  (indexUp && middleUp &&  ringUp &&  pinkyUp) return 'OPEN';
+  if (!indexUp && !middleUp && !ringUp && !pinkyUp) return 'FIST';
+  return 'NEUTRAL';
+}
+
+function smoothGesture(raw) {
+  gestureBuffer.push(raw);
+  if (gestureBuffer.length > BUFFER_SIZE) gestureBuffer.shift();
+  const counts = {};
+  gestureBuffer.forEach(g => counts[g] = (counts[g]||0)+1);
+  return Object.entries(counts).sort((a,b)=>b[1]-a[1])[0][0];
+}
+
+// ─── DRAWING ───────────────────────────────────────────────────────
+const COLORS = {
+  PINCH:    '#00d4ff',
+  SCISSORS: '#ff4560',
+  OPEN:     '#ffa500',
+  FIST:     '#00ff9d',
+  NEUTRAL:  'rgba(0,255,157,0.6)',
+};
+
+const CONNECTIONS = window.HAND_CONNECTIONS || [
+  [0,1],[1,2],[2,3],[3,4],
+  [0,5],[5,6],[6,7],[7,8],
+  [5,9],[9,10],[10,11],[11,12],
+  [9,13],[13,14],[14,15],[15,16],
+  [13,17],[17,18],[18,19],[19,20],
+  [0,17]
+];
+
+function drawHand(landmarks, gesture) {
+  const W = canvasEl.width, H = canvasEl.height;
+  const color = COLORS[gesture] || COLORS.NEUTRAL;
+
+  // Connections
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1.5;
+  ctx.globalAlpha = 0.6;
+  CONNECTIONS.forEach(([a,b]) => {
+    ctx.beginPath();
+    ctx.moveTo(landmarks[a].x * W, landmarks[a].y * H);
+    ctx.lineTo(landmarks[b].x * W, landmarks[b].y * H);
+    ctx.stroke();
+  });
+  ctx.globalAlpha = 1;
+
+  // Dots
+  landmarks.forEach((lm, i) => {
+    const x = lm.x * W, y = lm.y * H;
+    const isTip = [4,8,12,16,20].includes(i);
+
+    ctx.beginPath();
+    ctx.arc(x, y, isTip ? 5 : 3, 0, Math.PI*2);
+    ctx.fillStyle = isTip ? color : 'rgba(0,255,157,0.8)';
+    ctx.fill();
+
+    if (isTip) {
+      ctx.beginPath();
+      ctx.arc(x, y, 10, 0, Math.PI*2);
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1;
+      ctx.globalAlpha = 0.3;
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+  });
+
+  // Pinch line
+  if (gesture === 'PINCH') {
+    const t = landmarks[4], idx = landmarks[8];
+    ctx.beginPath();
+    ctx.moveTo(t.x * W, t.y * H);
+    ctx.lineTo(idx.x * W, idx.y * H);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
+    ctx.setLineDash([4,4]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    const mx = ((t.x + idx.x)/2)*W, my = ((t.y + idx.y)/2)*H;
+    const d = Math.round(pinchDist(landmarks) * 1000) / 1000;
+    ctx.fillStyle = color;
+    ctx.font = '9px "IBM Plex Mono"';
+    ctx.fillText(`d=${d}`, mx+8, my-4);
+  }
+}
+
+// ─── UI UPDATES ────────────────────────────────────────────────────
+function clearGestureCards() {
+  ['pinch','scissors','open','fist'].forEach(g => {
+    document.getElementById(`gc-${g}`).className = 'gesture-card';
+  });
+}
+
+function updateUI(results) {
+  const hands = results.multiHandLandmarks || [];
+  document.getElementById('hand-count').textContent = hands.length;
+
+  // Clear landmark grid
+  const grid = document.getElementById('lm-grid');
+  grid.innerHTML = `
+    <span class="lm-header">LM</span>
+    <span class="lm-header">X</span>
+    <span class="lm-header">Y</span>
+    <span class="lm-header">Z</span>
+  `;
+
+  if (hands.length === 0) {
+    clearGestureCards();
+    document.getElementById('gesture-badge').className = '';
+    document.getElementById('gesture-badge').textContent = '—';
+    ['index','middle','ring','pinky','thumb'].forEach(f =>
+      document.getElementById(`dot-${f}`).className = 'dot'
+    );
+    document.getElementById('conf-det').style.width = '0%';
+    document.getElementById('conf-trk').style.width = '0%';
+    document.getElementById('conf-det-val').textContent = '--';
+    document.getElementById('conf-trk-val').textContent = '--';
+    return;
+  }
+
+  const lm = hands[0];
+  const gesture = smoothGesture(detectGesture(lm));
+  const dist = Math.round(pinchDist(lm) * 1000) / 1000;
+
+  // Update gesture cards
+  clearGestureCards();
+  const gcMap = { PINCH:'pinch', SCISSORS:'scissors', OPEN:'open', FIST:'fist' };
+  if (gcMap[gesture]) {
+    document.getElementById(`gc-${gcMap[gesture]}`).className = `gesture-card active-${gcMap[gesture]}`;
+  }
+  document.getElementById('gc-pinch-conf').textContent = `dist(L4,L8): ${dist}`;
+
+  // Badge
+  const badge = document.getElementById('gesture-badge');
+  const badgeMap = { PINCH:'🤌 PINCH — GRASP', SCISSORS:'✌️ SCISSORS — CUT', OPEN:'🖐 OPEN — RETRACT', FIST:'✊ FIST — RELEASE', NEUTRAL:'' };
+  const classMap = { PINCH:'pinch', SCISSORS:'scissors', OPEN:'open', FIST:'fist' };
+  badge.textContent = badgeMap[gesture] || '';
+  badge.className = gesture !== 'NEUTRAL' ? `visible ${classMap[gesture]||''}` : '';
+
+  // Finger dots
+  const fingers = ['index','middle','ring','pinky','thumb'];
+  const tipPipPairs = [[8,6],[12,10],[16,14],[20,18],[4,3]];
+  fingers.forEach((f,i) => {
+    const [tip, pip] = tipPipPairs[i];
+    const up = lm[tip].y < lm[pip].y;
+    document.getElementById(`dot-${f}`).className = up ? 'dot up' : 'dot';
+  });
+
+  // Landmark grid (key points only)
+  KEY_LMS.forEach(i => {
+    const l = lm[i];
+    const name = LM_NAMES[i];
+    const tipClass = [4,8,12,16,20].includes(i) ? ' highlight' : '';
+    grid.innerHTML += `
+      <span class="lm-row${tipClass}">${name}</span>
+      <span class="lm-row${tipClass}">${l.x.toFixed(3)}</span>
+      <span class="lm-row${tipClass}">${l.y.toFixed(3)}</span>
+      <span class="lm-row${tipClass}">${l.z.toFixed(3)}</span>
+    `;
+  });
+
+  // Confidence
+  const conf = results.multiHandedness?.[0];
+  if (conf) {
+    const val = Math.round(conf.score * 100);
+    document.getElementById('conf-det').style.width = val + '%';
+    document.getElementById('conf-trk').style.width = val + '%';
+    document.getElementById('conf-det-val').textContent = val + '%';
+    document.getElementById('conf-trk-val').textContent = val + '%';
+  }
+}
+
+// ─── MEDIAPIPE SETUP ───────────────────────────────────────────────
+function onResults(results) {
+  // Resize canvas to match video
+  canvasEl.width  = videoEl.videoWidth  || canvasEl.offsetWidth;
+  canvasEl.height = videoEl.videoHeight || canvasEl.offsetHeight;
+
+  ctx.clearRect(0, 0, canvasEl.width, canvasEl.height);
+
+  const hands = results.multiHandLandmarks || [];
+  hands.forEach(lm => {
+    const gesture = smoothGesture(detectGesture(lm));
+    drawHand(lm, gesture);
+  });
+
+  updateUI(results);
+
+  // FPS
+  frameCount++;
+  const now = performance.now();
+  if (now - lastTime > 500) {
+    const fps = Math.round(frameCount / ((now - lastTime) / 1000));
+    document.getElementById('fps-display').textContent = `FPS: ${fps}`;
+    frameCount = 0;
+    lastTime = now;
+  }
+
+  document.getElementById('resolution-info').textContent =
+    `RESOLUTION: ${canvasEl.width}×${canvasEl.height}`;
+}
+
+// Init MediaPipe Hands
+const hands = new Hands({
+  locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+});
+
+hands.setOptions({
+  maxNumHands: 2,
+  modelComplexity: 1,
+  minDetectionConfidence: 0.75,
+  minTrackingConfidence: 0.75
+});
+
+hands.onResults(onResults);
+
+// Start camera
+const camera = new Camera(videoEl, {
+  onFrame: async () => { await hands.send({ image: videoEl }); },
+  width: 1280,
+  height: 720
+});
+
+camera.start().then(() => {
+  document.getElementById('loading-msg').style.display = 'none';
+  document.getElementById('status-text').textContent = 'LIVE';
+}).catch(err => {
+  const msg = document.getElementById('loading-msg');
+  msg.innerHTML = `
+    <div style="font-size:28px">⚠️</div>
+    <p style="color:#ff4560">CAMERA ACCESS DENIED</p>
+    <p style="font-size:10px;margin-top:8px;color:rgba(0,255,157,0.4)">
+      Allow camera access in your<br>browser and reload this page.
+    </p>
+  `;
+  document.getElementById('status-text').textContent = 'ERROR';
+  console.error(err);
+});
+
+// Handle resize
+window.addEventListener('resize', () => {
+  canvasEl.width = canvasEl.offsetWidth;
+  canvasEl.height = canvasEl.offsetHeight;
+});
+</script>
+</body>
+</html>
